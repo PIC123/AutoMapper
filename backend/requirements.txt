@@ -4,7 +4,7 @@ python-multipart
 torch
 torchvision
 opencv-python
-numpy
+numpy<2.0
 Pillow
 # SAM 1
 segment-anything
