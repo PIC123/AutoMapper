@@ -4,45 +4,48 @@ import torch
 from typing import List, Dict
 import cv2
 
-# Try to import segment_anything
+# Try to import mobile_sam (lightweight replacement for segment_anything)
 try:
-    from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
+    from mobile_sam import sam_model_registry, SamAutomaticMaskGenerator
     SAM_AVAILABLE = True
 except ImportError:
     SAM_AVAILABLE = False
-    print("Segment Anything not installed. Using dummy mode.")
+    print("MobileSAM not installed. Using dummy mode.")
 
 class SAMService:
     def __init__(self):
         self.mask_generator = None
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = "cpu" # Force CPU for cheap serverless/container hosting
         self.load_model()
 
     def load_model(self):
         if not SAM_AVAILABLE:
             return
 
-        # Look for model in current directory or /app (docker)
-        checkpoint_path = "sam_vit_b_01ec64.pth"
+        # Look for model in current directory
+        checkpoint_path = "mobile_sam.pt"
         if not os.path.exists(checkpoint_path):
-             # Try absolute path for Docker if needed, or just warn
-             checkpoint_path = "/app/sam_vit_b_01ec64.pth"
+             checkpoint_path = "/app/mobile_sam.pt"
         
-        model_type = "vit_b"
+        # MobileSAM uses 'vit_t' (Tiny ViT)
+        model_type = "vit_t"
         
         if not os.path.exists(checkpoint_path):
             print(f"Checkpoint {checkpoint_path} not found. Running in dummy mode.")
             return
 
         try:
-            print(f"Loading SAM model from {checkpoint_path}...")
+            print(f"Loading MobileSAM model from {checkpoint_path}...")
+            # MobileSAM registry expects "vit_t"
             sam = sam_model_registry[model_type](checkpoint=checkpoint_path)
             sam.to(device=self.device)
-            # Using AutomaticMaskGenerator for the "Multi-Surface" detection
+            
+            # Using AutomaticMaskGenerator
+            # MobileSAM is fast enough to run automatic generation even on CPU
             self.mask_generator = SamAutomaticMaskGenerator(sam)
-            print("SAM Model loaded successfully.")
+            print("MobileSAM Model loaded successfully.")
         except Exception as e:
-            print(f"Failed to load SAM model: {e}")
+            print(f"Failed to load MobileSAM model: {e}")
 
     def segment_image(self, image: np.ndarray) -> List[Dict]:
         if self.mask_generator is not None:

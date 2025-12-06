@@ -3,7 +3,7 @@ FROM python:3.10-slim
 WORKDIR /app
 
 # Install system dependencies for OpenCV
-# libgl1-mesa-glx is not needed for opencv-python-headless, but libglib2.0-0 is often required
+# libglib2.0-0 is required for opencv-python-headless
 RUN apt-get update && apt-get install -y \
     libglib2.0-0 \
     wget \
@@ -13,9 +13,8 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Download SAM model during build to bake it into image
-# Using ViT-B (smallest ~375MB)
-RUN wget -q https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth -O sam_vit_b_01ec64.pth
+# Download MobileSAM model (approx 40MB) instead of original SAM (375MB+)
+RUN wget -q https://github.com/ChaoningZhang/MobileSAM/raw/master/weights/mobile_sam.pt -O mobile_sam.pt
 
 # Copy app code
 COPY . .
@@ -25,4 +24,3 @@ EXPOSE 8000
 
 # Run command
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-
