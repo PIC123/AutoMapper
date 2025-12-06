@@ -4,18 +4,20 @@ import torch
 from typing import List, Dict
 import cv2
 
-# Try to import mobile_sam (lightweight replacement for segment_anything)
+# Try to import segment_anything
 try:
-    from mobile_sam import sam_model_registry, SamAutomaticMaskGenerator
+    from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
     SAM_AVAILABLE = True
 except ImportError:
     SAM_AVAILABLE = False
-    print("MobileSAM not installed. Using dummy mode.")
+    print("Segment Anything not installed. Using dummy mode.")
 
 class SAMService:
     def __init__(self):
         self.mask_generator = None
-        self.device = "cpu" # Force CPU for cheap serverless/container hosting
+        # Auto-detect CUDA for local GPU usage
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"SAM Service using device: {self.device}")
         self.load_model()
 
     def load_model(self):
@@ -23,29 +25,38 @@ class SAMService:
             return
 
         # Look for model in current directory
-        checkpoint_path = "mobile_sam.pt"
-        if not os.path.exists(checkpoint_path):
-             checkpoint_path = "/app/mobile_sam.pt"
+        # Standard SAM ViT-H (huge) or ViT-B (base)
+        # Let's try to find any model
+        checkpoints = [
+            "sam_vit_h_4b8939.pth",
+            "sam_vit_l_0b3195.pth",
+            "sam_vit_b_01ec64.pth"
+        ]
         
-        # MobileSAM uses 'vit_t' (Tiny ViT)
-        model_type = "vit_t"
+        checkpoint_path = None
+        model_type = None
+
+        for cp in checkpoints:
+            if os.path.exists(cp):
+                checkpoint_path = cp
+                if "vit_h" in cp: model_type = "vit_h"
+                if "vit_l" in cp: model_type = "vit_l"
+                if "vit_b" in cp: model_type = "vit_b"
+                break
         
-        if not os.path.exists(checkpoint_path):
-            print(f"Checkpoint {checkpoint_path} not found. Running in dummy mode.")
+        if not checkpoint_path:
+            print("No SAM checkpoint found locally. Please download one.")
+            print("Download: https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth")
             return
 
         try:
-            print(f"Loading MobileSAM model from {checkpoint_path}...")
-            # MobileSAM registry expects "vit_t"
+            print(f"Loading SAM model ({model_type}) from {checkpoint_path}...")
             sam = sam_model_registry[model_type](checkpoint=checkpoint_path)
             sam.to(device=self.device)
-            
-            # Using AutomaticMaskGenerator
-            # MobileSAM is fast enough to run automatic generation even on CPU
             self.mask_generator = SamAutomaticMaskGenerator(sam)
-            print("MobileSAM Model loaded successfully.")
+            print("SAM Model loaded successfully.")
         except Exception as e:
-            print(f"Failed to load MobileSAM model: {e}")
+            print(f"Failed to load SAM model: {e}")
 
     def segment_image(self, image: np.ndarray) -> List[Dict]:
         if self.mask_generator is not None:
