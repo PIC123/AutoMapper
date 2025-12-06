@@ -3,30 +3,82 @@ import os
 import torch
 from typing import List, Dict
 import cv2
+import sys
 
-# Try to import segment_anything
+# Support for both SAM 1 and SAM 2
+SAM_VERSION = None
+
 try:
-    from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
-    SAM_AVAILABLE = True
+    from sam2.build_sam import build_sam2
+    from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
+    SAM_VERSION = 2
+    print("SAM 2 library detected.")
 except ImportError:
-    SAM_AVAILABLE = False
-    print("Segment Anything not installed. Using dummy mode.")
+    try:
+        from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
+        SAM_VERSION = 1
+        print("SAM 1 library detected.")
+    except ImportError:
+        print("No SAM library detected. Using dummy mode.")
 
 class SAMService:
     def __init__(self):
         self.mask_generator = None
-        # Auto-detect CUDA for local GPU usage
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"SAM Service using device: {self.device}")
+        
+        # Allow CPU fallback for SAM 2 (it supports it better than SAM 1 usually)
+        if self.device == "cpu":
+            print("Warning: Running on CPU. Inference might be slow.")
+
         self.load_model()
 
     def load_model(self):
-        if not SAM_AVAILABLE:
+        if not SAM_VERSION:
             return
 
-        # Look for model in current directory
-        # Standard SAM ViT-H (huge) or ViT-B (base)
-        # Let's try to find any model
+        if SAM_VERSION == 2:
+            self._load_sam2()
+        else:
+            self._load_sam1()
+
+    def _load_sam2(self):
+        # SAM 2 Configurations
+        # We need the config filename (YAML) and the checkpoint (PT)
+        # Expected files in current dir: sam2_hiera_large.pt, etc.
+        
+        # Map checkpoints to configs
+        # Note: Configs are usually bundled in the library, passing just the name works if installed correctly.
+        models = {
+            "sam2_hiera_large.pt": "sam2_hiera_l.yaml",
+            "sam2_hiera_base_plus.pt": "sam2_hiera_b+.yaml",
+            "sam2_hiera_small.pt": "sam2_hiera_s.yaml",
+            "sam2_hiera_tiny.pt": "sam2_hiera_t.yaml"
+        }
+
+        checkpoint_path = None
+        config_name = None
+
+        for cp, cfg in models.items():
+            if os.path.exists(cp):
+                checkpoint_path = cp
+                config_name = cfg
+                break
+        
+        if not checkpoint_path:
+            print("No SAM 2 checkpoint found. Please download one (e.g., sam2_hiera_large.pt).")
+            return
+
+        try:
+            print(f"Loading SAM 2 from {checkpoint_path} with config {config_name}...")
+            sam = build_sam2(config_name, checkpoint_path, device=self.device, apply_postprocessing=False)
+            self.mask_generator = SAM2AutomaticMaskGenerator(sam)
+            print("SAM 2 Model loaded successfully.")
+        except Exception as e:
+            print(f"Failed to load SAM 2 model: {e}")
+            print("Ensure the yaml config is accessible or installed with the package.")
+
+    def _load_sam1(self):
         checkpoints = [
             "sam_vit_h_4b8939.pth",
             "sam_vit_l_0b3195.pth",
@@ -45,18 +97,17 @@ class SAMService:
                 break
         
         if not checkpoint_path:
-            print("No SAM checkpoint found locally. Please download one.")
-            print("Download: https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth")
+            print("No SAM 1 checkpoint found.")
             return
 
         try:
-            print(f"Loading SAM model ({model_type}) from {checkpoint_path}...")
+            print(f"Loading SAM 1 ({model_type}) from {checkpoint_path}...")
             sam = sam_model_registry[model_type](checkpoint=checkpoint_path)
             sam.to(device=self.device)
             self.mask_generator = SamAutomaticMaskGenerator(sam)
-            print("SAM Model loaded successfully.")
+            print("SAM 1 Model loaded successfully.")
         except Exception as e:
-            print(f"Failed to load SAM model: {e}")
+            print(f"Failed to load SAM 1 model: {e}")
 
     def segment_image(self, image: np.ndarray) -> List[Dict]:
         if self.mask_generator is not None:
@@ -66,22 +117,21 @@ class SAMService:
             
             masks = self.mask_generator.generate(image_rgb)
             
-            # Convert to our API format
+            # SAM 1 and SAM 2 both return list of dicts with 'segmentation', 'area', etc.
+            # Format is compatible.
+            
             results = []
             for i, m in enumerate(masks):
                 # m['segmentation'] is boolean mask
-                # Find contours
                 mask_uint8 = (m['segmentation'] * 255).astype(np.uint8)
                 contours, _ = cv2.findContours(mask_uint8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 
                 for contour in contours:
-                    # Simplify contour
                     epsilon = 0.005 * cv2.arcLength(contour, True)
                     approx = cv2.approxPolyDP(contour, epsilon, True)
                     
                     if len(approx) < 3: continue
                     
-                    # Convert to Point list
                     points = [{"x": int(p[0][0]), "y": int(p[0][1])} for p in approx]
                     
                     results.append({
@@ -90,7 +140,6 @@ class SAMService:
                         "area": float(m['area'])
                     })
             
-            # Filter small areas
             results = [r for r in results if r['area'] > 1000]
             return results
 

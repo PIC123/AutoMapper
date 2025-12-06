@@ -6,4 +6,7 @@ torchvision
 opencv-python
 numpy
 Pillow
+# SAM 1
 segment-anything
+# SAM 2 (Install from git)
+# git+https://github.com/facebookresearch/sam2.git
