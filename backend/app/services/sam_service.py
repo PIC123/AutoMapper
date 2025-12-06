@@ -37,18 +37,18 @@ class SAMService:
         if not SAM_VERSION:
             return
 
+        loaded = False
         if SAM_VERSION == 2:
-            self._load_sam2()
-        else:
+            loaded = self._load_sam2()
+        
+        # Fallback to SAM 1 if SAM 2 failed or not present (and we somehow detected SAM 2 lib)
+        if not loaded:
+            print("Trying fallback to SAM 1...")
             self._load_sam1()
 
-    def _load_sam2(self):
+    def _load_sam2(self) -> bool:
         # SAM 2 Configurations
-        # We need the config filename (YAML) and the checkpoint (PT)
-        # Expected files in current dir: sam2_hiera_large.pt, etc.
-        
-        # Map checkpoints to configs
-        # Note: Configs are usually bundled in the library, passing just the name works if installed correctly.
+        # ... (rest of config map)
         models = {
             "sam2_hiera_large.pt": "sam2_hiera_l.yaml",
             "sam2_hiera_base_plus.pt": "sam2_hiera_b+.yaml",
@@ -67,16 +67,18 @@ class SAMService:
         
         if not checkpoint_path:
             print("No SAM 2 checkpoint found. Please download one (e.g., sam2_hiera_large.pt).")
-            return
+            return False
 
         try:
             print(f"Loading SAM 2 from {checkpoint_path} with config {config_name}...")
             sam = build_sam2(config_name, checkpoint_path, device=self.device, apply_postprocessing=False)
             self.mask_generator = SAM2AutomaticMaskGenerator(sam)
             print("SAM 2 Model loaded successfully.")
+            return True
         except Exception as e:
             print(f"Failed to load SAM 2 model: {e}")
             print("Ensure the yaml config is accessible or installed with the package.")
+            return False
 
     def _load_sam1(self):
         checkpoints = [
